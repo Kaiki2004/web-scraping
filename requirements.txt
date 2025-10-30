@@ -1,0 +1,14 @@
+# Manipulação de dados e planilhas
+pandas
+openpyxl
+
+# Web scraping
+beautifulsoup4
+selenium
+webdriver-manager
+
+# Utilitários e formatação
+requests
+
+# Compatibilidade e tempo
+python-dateutil
