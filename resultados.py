@@ -1,18 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Gráficos e rankings a partir do MySQL mostrando APENAS Magalu e KaBuM!
-
-Mudanças-chave:
-- Após normalizar 'fornecedor', filtra o DataFrame para manter só ['Magalu', 'KaBuM!']
-- Paleta fixa (Magalu azul, KaBuM! laranja)
-- Restante idêntico ao resultados_full.py
-
-Uso:
-  pip install pandas numpy sqlalchemy pymysql matplotlib seaborn
-  python resultados_mag_kabum_only.py --like "Galaxy S24"
-"""
-
 import os
 import argparse
 import numpy as np
@@ -27,7 +12,7 @@ MYSQL_USER = os.environ.get("MYSQL_USER", "root")
 MYSQL_PASS = os.environ.get("MYSQL_PASS", "admin")
 MYSQL_HOST = os.environ.get("MYSQL_HOST", "127.0.0.1")
 MYSQL_PORT = os.environ.get("MYSQL_PORT", "3306")
-MYSQL_DB   = os.environ.get("MYSQL_DB", "ecommerce_scraping")
+MYSQL_DB = os.environ.get("MYSQL_DB", "ecommerce_scraping")
 
 OUTPUT_DIR = os.environ.get("SCRAPE_OUTPUT_DIR", "./outputs")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -97,7 +82,7 @@ def filter_product(df, product_code=None, product_like=None):
     if product_like:
         like = str(product_like).strip()
         mask = (
-            d["brand"].astype(str).str.contains(like, case=False, na=False) |
+            #d["brand"].astype(str).str.contains(like, case=False, na=False) |
             d["model"].astype(str).str.contains(like, case=False, na=False)
         )
         d = d[mask]
@@ -236,6 +221,73 @@ def total_price_pie(df):
     savefig(out)
     return out
 
+# ============== NOVO GRÁFICO: Top 5 Produtos por Fornecedor ==============
+def top5_products_price_trend(df):
+    """
+    Gera 2 gráficos: Variação temporal de preço dos Top 5 produtos
+    mais frequentes para CADA fornecedor ('Magalu' e 'KaBuM!').
+    """
+    results = []
+    fornecedores = ["Magalu", "KaBuM!"]
+    
+    for fornecedor in fornecedores:
+        d_store = df[df["fornecedor"] == fornecedor].copy()
+
+        # 1. Identificar os 5 produtos mais frequentes (baseado na contagem de registros)
+        top_codes = (
+            d_store["product_code"]
+            .value_counts()
+            .head(5)
+            .index.tolist()
+        )
+        
+        d_top = d_store[d_store["product_code"].isin(top_codes)].copy()
+        
+        if d_top.empty:
+            print(f"[AVISO] DataFrame vazio ou sem 5 produtos únicos para Top 5 de {fornecedor}.")
+            continue
+            
+        # Criar um rótulo de produto mais descritivo
+        def make_label(row):
+             # Combina marca/modelo/código para o rótulo da linha
+            return f" {row.get('model', '')}"
+        
+        # Cria um rótulo único para o campo 'hue'
+        d_top['product_label'] = d_top.apply(make_label, axis=1)
+
+        # 2. Calcular a média diária de preço por produto
+        d_plot = (
+            d_top.groupby(["product_label", "date"], as_index=False)["price"]
+                .mean()
+                .sort_values("date")
+        )
+
+        # 3. Gerar o gráfico
+        plt.figure(figsize=(10, 6.5))
+        ax = sns.lineplot(
+            data=d_plot, 
+            x="date", 
+            y="price", 
+            hue="product_label", 
+            marker="o"
+        )
+        
+        ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=8))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%d/%m"))
+        plt.xticks(rotation=45, ha="right")
+        plt.xlabel("Data")
+        plt.ylabel("Preço médio (R$)")
+        plt.title(f"Evolução de preço dos Top 5 produtos mais frequentes - {fornecedor}")
+        plt.legend(title="Produto", bbox_to_anchor=(1.05, 1), loc=2)
+        
+        out = os.path.join(OUTPUT_DIR, f"06_top5_price_trend_{fornecedor.lower()}.png")
+        savefig(out)
+        results.append(out)
+        
+    return results
+# ===========================================================================
+
+
 # ============== Rankings (com filtro aplicado) ==============
 def export_rankings(df):
     last_date = df.groupby("id_product")["date"].max().reset_index().rename(columns={"date": "last_date"})
@@ -244,9 +296,9 @@ def export_rankings(df):
 
     p_rank = (
         d.groupby(["id_product", "brand", "model", "product_code"], as_index=False)["price"]
-         .mean()
-         .sort_values("price", ascending=True)
-         .head(5)
+          .mean()
+          .sort_values("price", ascending=True)
+          .head(5)
     )
     path_price = os.path.join(OUTPUT_DIR, "rank_top5_mais_baratos.csv")
     p_rank.to_csv(path_price, index=False)
@@ -254,9 +306,9 @@ def export_rankings(df):
     r = d.dropna(subset=["avaliacao"])
     r_rank = (
         r.groupby(["id_product", "brand", "model", "product_code"], as_index=False)["avaliacao"]
-         .mean()
-         .sort_values("avaliacao", ascending=False)
-         .head(5)
+          .mean()
+          .sort_values("avaliacao", ascending=False)
+          .head(5)
     )
     path_rating = os.path.join(OUTPUT_DIR, "rank_top5_melhor_avaliados.csv")
     r_rank.to_csv(path_rating, index=False)
@@ -290,6 +342,11 @@ def main():
         var_pct_line(df),
         total_price_pie(df),
     ]
+    
+    # Adiciona os caminhos dos novos gráficos de Top 5
+    top5_paths = top5_products_price_trend(df)
+    outs.extend(top5_paths)
+    
     csv_price, csv_rating = export_rankings(df)
 
     print("[SAÍDAS]")
@@ -298,6 +355,8 @@ def main():
             print(" ", o)
     print(" ", csv_price)
     print(" ", csv_rating)
+
+
 
 if __name__ == "__main__":
     main()
